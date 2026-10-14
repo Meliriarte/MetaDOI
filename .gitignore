@@ -1,0 +1,16 @@
+# Bytecode de Python
+__pycache__/
+*.py[cod]
+
+# Indice local de Scimago (se regenera con actualizar_scimago.py)
+datos/scimago.csv
+
+# Entornos virtuales y secretos
+.venv/
+venv/
+.env
+
+# Empaquetado
+*.egg-info/
+build/
+dist/
