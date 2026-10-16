@@ -1,13 +1,21 @@
 # -*- coding: utf-8 -*-
 """Configuracion central del proyecto Metadatos-DOI."""
 
+import sys
 from pathlib import Path
 
 # --------------------------------------------------------------------------
 # Rutas
 # --------------------------------------------------------------------------
-BASE_DIR = Path(__file__).resolve().parent
+# Empaquetada con PyInstaller, la app corre junto a su .exe; si no, junto a este
+# archivo. Asi datos/scimago.db siempre queda al lado del ejecutable.
+if getattr(sys, "frozen", False):
+    BASE_DIR = Path(sys.executable).resolve().parent
+else:
+    BASE_DIR = Path(__file__).resolve().parent
 DATOS_DIR = BASE_DIR / "datos"
+SCIMAGO_DB = DATOS_DIR / "scimago.db"
+# CSV legado: solo se usa para migrar a la base de datos (ver --desde-csv).
 SCIMAGO_CSV = DATOS_DIR / "scimago.csv"
 
 # --------------------------------------------------------------------------

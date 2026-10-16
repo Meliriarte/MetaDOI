@@ -1,0 +1,2 @@
+# Dependencias solo para construir el .exe
+pyinstaller

@@ -1,7 +1,7 @@
 # Metadatos-DOI
 
-Herramienta de línea de comandos que, a partir de uno o varios **DOI**, devuelve
-una lista con los datos bibliográficos de cada publicación:
+Herramienta que, a partir de uno o varios **DOI**, devuelve una lista con los datos
+bibliográficos de cada publicación:
 
 | Campo | Descripción |
 | --- | --- |
@@ -11,10 +11,16 @@ una lista con los datos bibliográficos de cada publicación:
 | **Indexación** | Cuartil Scimago (`Q1`..`Q4`), o `otro` para libros, o `REVISAR`. |
 | **Enlace** | URL del editor (o `https://doi.org/<doi>` si no hay otra). |
 
+Se puede usar de dos formas:
+
+- **App de escritorio** (`app_gui.py`, con interfaz gráfica). Pensada para Windows.
+- **Línea de comandos** (`buscar_doi.py`).
+
 Todo corre **local y gratis**, sin inteligencia artificial:
 
 - Los datos bibliográficos salen de la **API de Crossref** (`api.crossref.org`).
-- El cuartil sale del **ranking anual de Scimago (SJR)**, descargado a un índice local.
+- El cuartil sale del **ranking anual de Scimago (SJR)**, guardado en un índice
+  local en formato **SQLite** (`datos/scimago.db`).
 
 ---
 
@@ -22,26 +28,27 @@ Todo corre **local y gratis**, sin inteligencia artificial:
 
 ```
               DOI               API de Crossref              Índice Scimago local
-   usuario ──────────►  buscar_doi.py ──────────► reúne metadatos ──────► cruza ISSN+año
+   usuario ──────────►  nucleo.py ──────────► reúne metadatos ──────► cruza ISSN+año
                                                           │                     │
                                                           ▼                     ▼
                                             Año / Fecha / Revista       Cuartil (Q1..Q4)
                                                           \                    /
                                                            ▼                  ▼
-                                                        Lista de 5 campos en pantalla
+                                                     App de escritorio o consola
 ```
 
 1. **`actualizar_scimago.py`** descarga el ranking de Scimago (1999–2025) y construye
-   el índice local `datos/scimago.csv`. Se corre **una vez al año**.
-2. **`buscar_doi.py`** pide los DOI, consulta Crossref y cruza el ISSN + año contra el
-   índice local para obtener el cuartil.
+   el índice local `datos/scimago.db`. Se corre **una vez al año**.
+2. **`nucleo.py`** consulta Crossref y cruza el ISSN + año contra el índice local
+   para obtener el cuartil.
+3. **`app_gui.py`** (interfaz gráfica) o **`buscar_doi.py`** (consola) muestran el resultado.
 
 ---
 
 ## Requisitos
 
 - **Python 3.8 o superior**.
-- La librería **`requests`** (es la única dependencia externa):
+- Dependencias (**`requests`** y **`customtkinter`**):
 
 ```
 pip install -r requirements.txt
@@ -63,10 +70,24 @@ pip install -r requirements.txt
 python actualizar_scimago.py
 ```
 
-Descarga los CSV oficiales de Scimago año por año y genera `datos/scimago.csv`
-(~65 MB, ~1.1 millones de registros). Tarda un par de minutos.
+Descarga los CSV oficiales de Scimago año por año y genera `datos/scimago.db`
+(~24 MB, ~1.1 millones de registros). Tarda un par de minutos.
 
-### 3. Consultar DOI(s)
+> Si ya tienes un CSV de Scimago descargado antes, puedes migrarlo sin volver a
+> bajar todo: `python actualizar_scimago.py --desde-csv datos/scimago.csv`.
+
+### 3. Usar la herramienta
+
+**App de escritorio:**
+
+```
+python app_gui.py
+```
+
+Pega uno o varios DOI en la caja de texto y pulsa **Consultar**. Los resultados
+aparecen en tarjetas.
+
+**Consola:**
 
 ```
 python buscar_doi.py
@@ -103,18 +124,9 @@ DOI: 10.1038/s41586-020-2649-2
   Indexacion:           Q1
   Enlace:               https://www.nature.com/articles/s41586-020-2649-2
 ------------------------------------------------------------
-
-------------------------------------------------------------
-DOI: 10.1007/978-3-540-68161-8_1
-  Anio:                 2007
-  Fecha de publicacion: 2007
-  Revista:              Beiträge zum ausländischen öffentlichen Recht und Völkerrecht
-  Indexacion:           otro
-  Enlace:               http://link.springer.com/10.1007/978-3-540-68161-8_1
-------------------------------------------------------------
 ```
 
-> **Tip:** puedes pegar los DOI en cualquier formato; el script limpia los prefijos
+> **Tip:** puedes pegar los DOI en cualquier formato; el programa limpia los prefijos
 > `https://doi.org/...` y `doi:` automáticamente. También acepta varios DOI separados
 > por espacios o comas en una misma línea.
 
@@ -152,25 +164,60 @@ Casos especiales:
 
 ---
 
+## Construir la app para Windows (`.exe`)
+
+Con PyInstaller se empaqueta la app en un ejecutable que **no requiere Python** en la
+máquina de destino:
+
+```
+pip install -r requirements-dev.txt
+pyinstaller --noconfirm --windowed --onedir --name MetaDOI ^
+  --collect-all customtkinter ^
+  --exclude-module numpy --exclude-module PIL --exclude-module cryptography ^
+  --exclude-module bcrypt --exclude-module setuptools ^
+  --exclude-module h2 --exclude-module hpack --exclude-module hyperframe ^
+  app_gui.py
+```
+
+- `--windowed` → sin ventana de consola.
+- `--collect-all customtkinter` → incluye los temas/recursos de CustomTkinter.
+- Los `--exclude-module` sacan librerías que no se usan (numpy, PIL, cryptography...)
+  y bajan el paquete de ~107 MB a ~56 MB.
+- El resultado queda en `dist/MetaDOI/`.
+
+**Distribución:** copia `datos/scimago.db` dentro de `dist/MetaDOI/datos/` y comprime
+la carpeta `dist/MetaDOI/` en un ZIP. El receptor descomprime y ejecuta `MetaDOI.exe`.
+La app busca la base de datos **junto al ejecutable**.
+
+> Windows puede mostrar un aviso de *"editor desconocido"* (normal, el `.exe` no está
+> firmado digitalmente). Se elige "Más información → Ejecutar de todas formas".
+
+---
+
 ## Estructura del proyecto
 
 ```
 Metadatos-DOI/
-├─ actualizar_scimago.py   # descarga Scimago y genera el índice local
-├─ buscar_doi.py           # consulta DOI(s) y muestra la lista
+├─ actualizar_scimago.py   # descarga Scimago y genera el índice SQLite
+├─ nucleo.py               # lógica compartida (Crossref + cuartil)
+├─ app_gui.py              # interfaz gráfica (CustomTkinter)
+├─ buscar_doi.py           # interfaz de consola
 ├─ config.py               # configuración central (correo, rutas, reglas)
 ├─ datos/
-│  └─ scimago.csv          # índice local: issn, anio, cuartil, tipo, titulo
-├─ requirements.txt        # dependencias (requests)
+│  └─ scimago.db           # índice local: issn, anio, cuartil
+├─ requirements.txt        # dependencias (requests, customtkinter)
+├─ requirements-dev.txt    # dependencias de build (pyinstaller)
 └─ README.md
 ```
 
 | Archivo | Qué hace |
 | --- | --- |
 | `config.py` | Configuración: correo de Crossref, rutas, rango de años, reglas y meses. |
-| `actualizar_scimago.py` | Descarga Scimago (1999–2025) y genera `datos/scimago.csv`. |
-| `buscar_doi.py` | Pide DOI(s) y muestra la lista de metadatos. |
-| `datos/scimago.csv` | Índice local con columnas `issn, anio, cuartil, tipo, titulo`. |
+| `actualizar_scimago.py` | Descarga Scimago (1999–2025) y genera `datos/scimago.db`. |
+| `nucleo.py` | Consulta Crossref y busca el cuartil en el índice. |
+| `app_gui.py` | Interfaz gráfica de escritorio. |
+| `buscar_doi.py` | Interfaz de consola. |
+| `datos/scimago.db` | Índice SQLite con columnas `issn, anio, cuartil`. |
 
 ---
 
@@ -211,7 +258,7 @@ Sí, para consultar Crossref en cada búsqueda. La descarga de Scimago también 
 internet, pero una vez construido el índice, la consulta del cuartil es local.
 
 **¿Se guarda un archivo con los resultados?**
-No. La salida es solo en pantalla, por diseño.
+No. La salida es en pantalla (o en la ventana de la app), por diseño.
 
 **¿Usa inteligencia artificial?**
 No. Son consultas estructuradas (Crossref + Scimago). Sin alucinaciones.
@@ -222,5 +269,5 @@ No. Son consultas estructuradas (Crossref + Scimago). Sin alucinaciones.
 
 - Scimago está detrás de **Cloudflare**; por eso la descarga usa cabeceras de navegador
   reales. Si algún año falla, el script reintenta 3 veces.
-- El índice local evita depender de la web de Scimago en cada consulta y hace las
-  búsquedas instantáneas.
+- El índice local en SQLite (`WITHOUT ROWID`) evita depender de la web de Scimago en
+  cada consulta, es liviano (~24 MB) y hace las búsquedas instantáneas.
