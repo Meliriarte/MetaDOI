@@ -13,17 +13,32 @@ Las consultas a Crossref corren en un hilo aparte para no congelar la ventana.
 import queue
 import re
 import threading
+import webbrowser
 
 import customtkinter as ctk
 import requests
 
-from config import SCIMAGO_DB, VALOR_REVISAR
+from config import BASE_DIR, SCIMAGO_DB, VALOR_REVISAR
 from nucleo import (
     conectar_indice,
     construir_resultado,
     consultar_crossref,
     limpiar_doi,
 )
+
+# Colores del badge de indexacion, uno por cuartil.
+COLORES_INDEXACION = {
+    "Q1": "#1f8f4e",
+    "Q2": "#2f7ed8",
+    "Q3": "#c99a1c",
+    "Q4": "#cc6a2f",
+}
+COLOR_INDEXACION_OTRO = "#5a5f66"  # "otro" / "REVISAR"
+
+# Paleta general.
+GRIS_TEXTO = "#9aa0a6"
+AZUL_ENLACE = "#6ea8fe"
+AMBAR_NOTA = "#e0a030"
 
 
 def parsear_dois(texto):
@@ -55,45 +70,97 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("MetaDOI")
-        self.geometry("780x640")
+        self.minsize(720, 560)
         self.cola = queue.Queue()
         self.consultando = False
+        self.ultimos = []
+        self._centrar(820, 700)
+        self._poner_icono()
         self._construir()
+
+    def _centrar(self, ancho, alto):
+        self.update_idletasks()
+        x = max(0, (self.winfo_screenwidth() - ancho) // 2)
+        y = max(0, (self.winfo_screenheight() - alto) // 3)
+        self.geometry("%dx%d+%d+%d" % (ancho, alto, x, y))
+
+    def _poner_icono(self):
+        ruta = BASE_DIR / "MetaDOI.ico"
+        if ruta.exists():
+            try:
+                self.iconbitmap(str(ruta))
+            except Exception:
+                pass
 
     def _construir(self):
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
 
+        # Encabezado.
+        cabecera = ctk.CTkFrame(self, fg_color="transparent")
+        cabecera.pack(padx=24, pady=(18, 4), fill="x")
         ctk.CTkLabel(
-            self, text="MetaDOI", font=ctk.CTkFont(size=24, weight="bold")
-        ).pack(padx=20, pady=(18, 2), anchor="w")
+            cabecera, text="MetaDOI", font=ctk.CTkFont(size=28, weight="bold")
+        ).pack(side="left")
         ctk.CTkLabel(
-            self,
-            text="Pega uno o varios DOI (uno por linea) y pulsa Consultar.",
-        ).pack(padx=20, pady=(0, 10), anchor="w")
+            cabecera,
+            text="metadatos + cuartil Scimago a partir de DOI",
+            text_color=GRIS_TEXTO,
+        ).pack(side="left", padx=12, pady=(10, 0))
 
-        entrada = ctk.CTkFrame(self)
-        entrada.pack(padx=20, pady=5, fill="x")
-        self.caja = ctk.CTkTextbox(entrada, height=96)
-        self.caja.pack(padx=10, pady=10, fill="x")
+        # Panel de entrada.
+        panel = ctk.CTkFrame(self, corner_radius=12)
+        panel.pack(padx=24, pady=8, fill="x")
+        ctk.CTkLabel(
+            panel, text="Pega uno o varios DOI (uno por linea):", anchor="w"
+        ).pack(padx=16, pady=(14, 4), anchor="w")
+        self.caja = ctk.CTkTextbox(panel, height=84, corner_radius=8)
+        self.caja.pack(padx=16, pady=(0, 12), fill="x")
 
-        botones = ctk.CTkFrame(self, fg_color="transparent")
-        botones.pack(padx=20, pady=5, fill="x")
-        self.boton = ctk.CTkButton(botones, text="Consultar", command=self.consultar)
+        botones = ctk.CTkFrame(panel, fg_color="transparent")
+        botones.pack(padx=16, pady=(0, 14), fill="x")
+        self.boton = ctk.CTkButton(
+            botones, text="Consultar", width=130, height=34, command=self.consultar
+        )
         self.boton.pack(side="left")
         ctk.CTkButton(
             botones,
             text="Limpiar",
+            width=90,
+            height=34,
             fg_color="gray35",
             hover_color="gray25",
             command=self.limpiar,
-        ).pack(side="left", padx=10)
+        ).pack(side="left", padx=8)
+        self.boton_copiar = ctk.CTkButton(
+            botones,
+            text="Copiar resultados",
+            width=150,
+            height=34,
+            fg_color="gray35",
+            hover_color="gray25",
+            state="disabled",
+            command=self.copiar,
+        )
+        self.boton_copiar.pack(side="right")
 
-        self.estado = ctk.CTkLabel(self, text="", anchor="w")
-        self.estado.pack(padx=20, pady=(4, 0), anchor="w")
+        # Barra de progreso y estado.
+        self.progreso = ctk.CTkProgressBar(self, height=6, corner_radius=3)
+        self.progreso.set(0)
+        self.progreso.pack(padx=24, pady=(4, 0), fill="x")
 
-        self.resultados = ctk.CTkScrollableFrame(self)
-        self.resultados.pack(padx=20, pady=10, fill="both", expand=True)
+        self.estado = ctk.CTkLabel(self, text="", anchor="w", text_color=GRIS_TEXTO)
+        self.estado.pack(padx=24, pady=(6, 0), anchor="w")
+
+        # Resultados.
+        self.resultados = ctk.CTkScrollableFrame(self, corner_radius=12)
+        self.resultados.pack(padx=24, pady=(6, 18), fill="both", expand=True)
+        self._mensaje_vacio("Aun no hay resultados.")
+
+    def _mensaje_vacio(self, texto):
+        ctk.CTkLabel(
+            self.resultados, text=texto, text_color=GRIS_TEXTO
+        ).pack(pady=30)
 
     def consultar(self):
         if self.consultando:
@@ -110,9 +177,12 @@ class App(ctk.CTk):
             return
 
         self._vaciar()
+        self.ultimos = []
         self.consultando = True
         self.boton.configure(state="disabled")
-        self.estado.configure(text="Preparando ...")
+        self.boton_copiar.configure(state="disabled")
+        self.progreso.set(0)
+        self.estado.configure(text="Consultando 0 de %d ..." % len(dois))
         threading.Thread(target=self._trabajar, args=(dois,), daemon=True).start()
         self.after(120, self._revisar_cola)
 
@@ -140,13 +210,17 @@ class App(ctk.CTk):
                 tipo = evento[0]
                 if tipo == "progreso":
                     _, indice, total = evento
+                    self.progreso.set(indice / total)
                     self.estado.configure(text="Consultando %d de %d ..." % (indice, total))
                 elif tipo == "tarjeta":
                     self._tarjeta(evento[1])
                 elif tipo == "fin":
                     self.consultando = False
                     self.boton.configure(state="normal")
-                    self.estado.configure(text="Listo.")
+                    self.progreso.set(1)
+                    if self.ultimos:
+                        self.boton_copiar.configure(state="normal")
+                    self.estado.configure(text="Listo: %d resultado(s)." % len(self.ultimos))
                     return
         except queue.Empty:
             pass
@@ -154,41 +228,108 @@ class App(ctk.CTk):
         if self.consultando:
             self.after(120, self._revisar_cola)
 
-    def _tarjeta(self, resultado):
-        tarjeta = ctk.CTkFrame(self.resultados)
-        tarjeta.pack(fill="x", padx=6, pady=6)
+    def _badge(self, padre, indexacion):
+        """Etiqueta de color segun el cuartil (Q1..Q4) o gris para otro/REVISAR."""
+        base = indexacion.split(" ")[0] if indexacion else ""
+        color = COLORES_INDEXACION.get(base, COLOR_INDEXACION_OTRO)
+        marco = ctk.CTkFrame(padre, fg_color=color, corner_radius=8)
         ctk.CTkLabel(
-            tarjeta,
-            text=resultado["doi"],
-            font=ctk.CTkFont(size=15, weight="bold"),
-        ).pack(anchor="w", padx=14, pady=(10, 4))
+            marco,
+            text=indexacion,
+            text_color="white",
+            font=ctk.CTkFont(size=12, weight="bold"),
+        ).pack(padx=10, pady=3)
+        return marco
 
-        campos = (
+    def _tarjeta(self, resultado):
+        self.ultimos.append(resultado)
+
+        tarjeta = ctk.CTkFrame(self.resultados, corner_radius=12)
+        tarjeta.pack(fill="x", padx=6, pady=6)
+        tarjeta.columnconfigure(0, weight=1)
+
+        # Fila superior: DOI + badge.
+        cab = ctk.CTkFrame(tarjeta, fg_color="transparent")
+        cab.grid(row=0, column=0, sticky="ew", padx=16, pady=(12, 6))
+        cab.columnconfigure(0, weight=1)
+        ctk.CTkLabel(
+            cab, text=resultado["doi"], font=ctk.CTkFont(size=15, weight="bold")
+        ).grid(row=0, column=0, sticky="w")
+        self._badge(cab, resultado["indexacion"]).grid(row=0, column=1, sticky="e")
+
+        # Campos alineados.
+        campos = ctk.CTkFrame(tarjeta, fg_color="transparent")
+        campos.grid(row=1, column=0, sticky="ew", padx=16, pady=(0, 8))
+        campos.columnconfigure(1, weight=1)
+        filas = (
             ("Anio", resultado["anio"]),
-            ("Fecha de publicacion", resultado["fecha"]),
+            ("Fecha", resultado["fecha"]),
             ("Revista", resultado["revista"]),
-            ("Indexacion", resultado["indexacion"]),
-            ("Enlace", resultado["enlace"]),
         )
-        for etiqueta, valor in campos:
+        for i, (nombre, valor) in enumerate(filas):
             ctk.CTkLabel(
-                tarjeta, text="%s: %s" % (etiqueta, valor), justify="left", wraplength=680
-            ).pack(anchor="w", padx=14)
+                campos, text=nombre, text_color=GRIS_TEXTO, width=64, anchor="w"
+            ).grid(row=i, column=0, sticky="w", pady=1)
+            ctk.CTkLabel(
+                campos, text=valor, anchor="w", justify="left", wraplength=560
+            ).grid(row=i, column=1, sticky="w", pady=1)
+
+        # Enlace + boton Abrir.
+        fila_enlace = ctk.CTkFrame(tarjeta, fg_color="transparent")
+        fila_enlace.grid(row=2, column=0, sticky="ew", padx=16, pady=(0, 6))
+        ctk.CTkLabel(
+            fila_enlace, text="Enlace", text_color=GRIS_TEXTO, width=64, anchor="w"
+        ).pack(side="left")
+        ctk.CTkButton(
+            fila_enlace,
+            text="Abrir",
+            width=64,
+            height=26,
+            command=lambda u=resultado["enlace"]: webbrowser.open(u),
+        ).pack(side="right")
+        ctk.CTkLabel(
+            fila_enlace,
+            text=resultado["enlace"],
+            text_color=AZUL_ENLACE,
+            anchor="w",
+            justify="left",
+            wraplength=460,
+        ).pack(side="left", padx=(0, 8))
 
         if resultado.get("nota"):
             ctk.CTkLabel(
-                tarjeta, text="(!) %s" % resultado["nota"], text_color="#e0a030"
-            ).pack(anchor="w", padx=14, pady=(2, 4))
-
-        ctk.CTkLabel(tarjeta, text="").pack(pady=2)
+                tarjeta,
+                text="(!) %s" % resultado["nota"],
+                text_color=AMBAR_NOTA,
+                anchor="w",
+                wraplength=600,
+            ).grid(row=3, column=0, sticky="w", padx=16, pady=(0, 10))
 
     def _vaciar(self):
         for hijo in self.resultados.winfo_children():
             hijo.destroy()
 
+    def copiar(self):
+        lineas = []
+        for r in self.ultimos:
+            lineas.append("DOI: %s" % r["doi"])
+            lineas.append("  Anio: %s" % r["anio"])
+            lineas.append("  Fecha de publicacion: %s" % r["fecha"])
+            lineas.append("  Revista: %s" % r["revista"])
+            lineas.append("  Indexacion: %s" % r["indexacion"])
+            lineas.append("  Enlace: %s" % r["enlace"])
+            lineas.append("")
+        self.clipboard_clear()
+        self.clipboard_append("\n".join(lineas))
+        self.estado.configure(text="Resultados copiados al portapapeles.")
+
     def limpiar(self):
         self.caja.delete("1.0", "end")
         self._vaciar()
+        self._mensaje_vacio("Aun no hay resultados.")
+        self.ultimos = []
+        self.progreso.set(0)
+        self.boton_copiar.configure(state="disabled")
         self.estado.configure(text="")
 
 
