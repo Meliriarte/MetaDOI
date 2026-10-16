@@ -79,6 +79,10 @@ TIPOS_SIN_CUARTIL = {
 VALOR_SIN_CUARTIL = "otro"   # libros y capitulos de libro
 VALOR_REVISAR = "REVISAR"    # no se pudo localizar el dato
 
+# Cuartiles validos. Scimago usa "-" cuando la revista no tiene cuartil ese
+# anio; ese valor NO es un cuartil y se ignora.
+CUARTILES_VALIDOS = {"Q1", "Q2", "Q3", "Q4"}
+
 # Si el cuartil no existe en el anio exacto de publicacion, se busca en el anio
 # mas cercano de esa revista (Scimago publica con ~1 anio de rezago). Este es el
 # limite de diferencia permitido; mas alla, se marca REVISAR.

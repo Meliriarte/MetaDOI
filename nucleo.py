@@ -17,6 +17,7 @@ import requests
 from config import (
     CABECERAS_CROSSREF,
     CROSSREF_URL,
+    CUARTILES_VALIDOS,
     MAX_GAP_ANIOS,
     MESES_ES,
     SCIMAGO_DB,
@@ -50,13 +51,15 @@ def buscar_cuartil(conexion, issns, anio):
 
     marcadores = ",".join("?" * len(issns))
     filas = conexion.execute(
-        "SELECT issn, anio, cuartil FROM cuartiles "
-        "WHERE cuartil <> '' AND issn IN (%s)" % marcadores,
+        "SELECT issn, anio, cuartil FROM cuartiles WHERE issn IN (%s)" % marcadores,
         tuple(issns),
     ).fetchall()
 
     por_issn = {}
     for issn, anio_fila, cuartil in filas:
+        # Se ignoran valores que no son un cuartil (p. ej. "-" o vacio).
+        if cuartil not in CUARTILES_VALIDOS:
+            continue
         por_issn.setdefault(issn, []).append((anio_fila, cuartil))
 
     # 1. Anio exacto, respetando el orden de los ISSN recibidos.
