@@ -172,6 +172,7 @@ máquina de destino:
 ```
 pip install -r requirements-dev.txt
 pyinstaller --noconfirm --windowed --onedir --name MetaDOI ^
+  --icon MetaDOI.ico ^
   --collect-all customtkinter ^
   --exclude-module numpy --exclude-module PIL --exclude-module cryptography ^
   --exclude-module bcrypt --exclude-module setuptools ^
@@ -180,6 +181,7 @@ pyinstaller --noconfirm --windowed --onedir --name MetaDOI ^
 ```
 
 - `--windowed` → sin ventana de consola.
+- `--icon MetaDOI.ico` → icono del ejecutable.
 - `--collect-all customtkinter` → incluye los temas/recursos de CustomTkinter.
 - Los `--exclude-module` sacan librerías que no se usan (numpy, PIL, cryptography...)
   y bajan el paquete de ~107 MB a ~56 MB.
