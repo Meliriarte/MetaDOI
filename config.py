@@ -7,13 +7,31 @@ from pathlib import Path
 # --------------------------------------------------------------------------
 # Rutas
 # --------------------------------------------------------------------------
-# Empaquetada con PyInstaller, la app corre junto a su .exe; si no, junto a este
-# archivo. Asi datos/scimago.db siempre queda al lado del ejecutable.
+# BASE_DIR: carpeta de la app. Empaquetada (onefile) es la carpeta temporal
+# donde PyInstaller extrae todo; en desarrollo, la carpeta del proyecto.
 if getattr(sys, "frozen", False):
-    BASE_DIR = Path(sys.executable).resolve().parent
+    BASE_DIR = Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent))
 else:
     BASE_DIR = Path(__file__).resolve().parent
-DATOS_DIR = BASE_DIR / "datos"
+
+
+def _resolver_datos():
+    """Ubica la carpeta 'datos' que contiene scimago.db.
+
+    - onefile: la db viaja embebida dentro del .exe y se extrae en BASE_DIR.
+    - onedir:  la db queda junto al .exe.
+    - desarrollo: junto al proyecto.
+    """
+    datos = BASE_DIR / "datos"
+    if (datos / "scimago.db").exists():
+        return datos
+    junto = Path(sys.executable).resolve().parent / "datos"
+    if (junto / "scimago.db").exists():
+        return junto
+    return datos
+
+
+DATOS_DIR = _resolver_datos()
 SCIMAGO_DB = DATOS_DIR / "scimago.db"
 # CSV legado: solo se usa para migrar a la base de datos (ver --desde-csv).
 SCIMAGO_CSV = DATOS_DIR / "scimago.csv"

@@ -166,30 +166,36 @@ Casos especiales:
 
 ## Construir la app para Windows (`.exe`)
 
-Con PyInstaller se empaqueta la app en un ejecutable que **no requiere Python** en la
-máquina de destino:
+Con PyInstaller se empaqueta la app en un **único archivo `.exe`** que **no requiere
+Python** ni la carpeta de datos: la base de Scimago (`datos/scimago.db`) viaja **dentro**
+del ejecutable.
 
 ```
 pip install -r requirements-dev.txt
-pyinstaller --noconfirm --windowed --onedir --name MetaDOI ^
+pyinstaller --noconfirm --windowed --onefile --name MetaDOI ^
   --icon MetaDOI.ico ^
   --collect-all customtkinter ^
+  --add-data "datos/scimago.db;datos" ^
   --exclude-module numpy --exclude-module PIL --exclude-module cryptography ^
   --exclude-module bcrypt --exclude-module setuptools ^
   --exclude-module h2 --exclude-module hpack --exclude-module hyperframe ^
   app_gui.py
 ```
 
+- `--onefile` → un solo `dist/MetaDOI.exe` (~20 MB), sin carpetas ni archivos sueltos.
+- `--add-data "datos/scimago.db;datos"` → incrusta el índice de Scimago dentro del `.exe`.
 - `--windowed` → sin ventana de consola.
 - `--icon MetaDOI.ico` → icono del ejecutable.
 - `--collect-all customtkinter` → incluye los temas/recursos de CustomTkinter.
-- Los `--exclude-module` sacan librerías que no se usan (numpy, PIL, cryptography...)
-  y bajan el paquete de ~107 MB a ~56 MB.
-- El resultado queda en `dist/MetaDOI/`.
+- Los `--exclude-module` sacan librerías que no se usan (numpy, PIL, cryptography...).
 
-**Distribución:** copia `datos/scimago.db` dentro de `dist/MetaDOI/datos/` y comprime
-la carpeta `dist/MetaDOI/` en un ZIP. El receptor descomprime y ejecuta `MetaDOI.exe`.
-La app busca la base de datos **junto al ejecutable**.
+**Distribución:** basta con entregar **`dist/MetaDOI.exe`**. El receptor lo ejecuta y ya;
+no necesita más archivos. La app resuelve la base de datos desde dentro del ejecutable
+(la extrae a una carpeta temporal al abrir; ver `_resolver_datos()` en `config.py`).
+
+> **Notas del modo `--onefile`:** el arranque tarda unos segundos (se autoextrae a
+> `%TEMP%`), algunos antivirus pueden mostrarse recelosos, y **para actualizar Scimago
+> hay que reconstruir el `.exe`** con el nuevo `datos/scimago.db`.
 
 > Windows puede mostrar un aviso de *"editor desconocido"* (normal, el `.exe` no está
 > firmado digitalmente). Se elige "Más información → Ejecutar de todas formas".
