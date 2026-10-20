@@ -14,6 +14,7 @@ venv/
 # Empaquetado
 build/
 dist/
+entrega/
 *.spec
 *.zip
 *.egg-info/

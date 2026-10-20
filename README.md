@@ -1,15 +1,22 @@
 # Metadatos-DOI
 
-Herramienta que, a partir de uno o varios **DOI**, devuelve una lista con los datos
-bibliográficos de cada publicación:
+Herramienta que, a partir de uno o varios **DOI** o **títulos de artículo** (el mejor
+match de Crossref), devuelve una lista con los datos bibliográficos de cada publicación:
 
 | Campo | Descripción |
 | --- | --- |
+| **Titulo** | Título del artículo, libro o capítulo. |
 | **Año** | Año de publicación. |
-| **Fecha de publicación / creación** | Mes y año (ej. `diciembre 2025`). |
+| **Fecha de publicación** | Mes y año (ej. `diciembre 2025`); si Crossref no trae mes, **solo el año**. |
 | **Revista** | Nombre de la revista, congreso o libro. |
-| **Indexación** | Cuartil Scimago (`Q1`..`Q4`), o `otro` para libros, o `REVISAR`. |
+| **Cuartil** | Cuartil Scimago (`Q1`..`Q4`), `Sin cuartil` o `REVISAR`. |
+| **ISSN / ISBN** | Identificadores que Crossref asocia a la obra. |
 | **Enlace** | URL del editor (o `https://doi.org/<doi>` si no hay otra). |
+
+Se puede buscar por:
+
+- **DOI** → datos del artículo y su cuartil.
+- **Título del artículo** → Crossref devuelve la mejor coincidencia y de ahí se toma el DOI.
 
 Se puede usar de dos formas:
 
@@ -27,7 +34,7 @@ Todo corre **local y gratis**, sin inteligencia artificial:
 ## ¿Cómo funciona? (flujo)
 
 ```
-              DOI               API de Crossref              Índice Scimago local
+              DOI o título         API de Crossref              Índice Scimago local
    usuario ──────────►  nucleo.py ──────────► reúne metadatos ──────► cruza ISSN+año
                                                           │                     │
                                                           ▼                     ▼
@@ -39,7 +46,9 @@ Todo corre **local y gratis**, sin inteligencia artificial:
 
 1. **`actualizar_scimago.py`** descarga el ranking de Scimago (1999–2025) y construye
    el índice local `datos/scimago.db`. Se corre **una vez al año**.
-2. **`nucleo.py`** consulta Crossref y cruza el ISSN + año contra el índice local
+2. **`nucleo.py`** resuelve la consulta: si es un DOI, va directo a Crossref; si es un
+   título, Crossref devuelve el mejor match (`query.title`, solo la mejor coincidencia)
+   y de ahí se toma el DOI. Después cruza ISSN + año contra el índice local
    para obtener el cuartil.
 3. **`app_gui.py`** (interfaz gráfica) o **`buscar_doi.py`** (consola) muestran el resultado.
 
@@ -84,8 +93,10 @@ Descarga los CSV oficiales de Scimago año por año y genera `datos/scimago.db`
 python app_gui.py
 ```
 
-Pega uno o varios DOI en la caja de texto y pulsa **Consultar**. Los resultados
-aparecen en tarjetas.
+Pega uno o varios DOI o títulos de artículo (uno por línea) en la caja de texto y pulsa
+**Consultar**. Los resultados aparecen en tarjetas, cada una con su barra lateral
+(verde si obtuvo cuartil, roja si no) y un botón **copiar** junto a cada campo
+(más **Abrir** en el enlace).
 
 **Consola:**
 
@@ -93,15 +104,15 @@ aparecen en tarjetas.
 python buscar_doi.py
 ```
 
-Pega **uno o varios DOI** (uno por línea) y pulsa **ENTER en vacío** para terminar:
+Pega **uno o varios DOI o títulos** y pulsa **ENTER en vacío** para terminar:
 
 ```
-Pega el/los DOI (uno por linea). ENTER en vacio para terminar.
+Pega uno o varios DOI o titulos de articulo, uno por linea.
+ENTER en vacio para terminar.
 
-DOI > 10.3390/s26144610
-DOI > 10.1038/s41586-020-2649-2
-DOI > 10.1007/978-3-540-68161-8_1
-DOI >
+> 10.3390/s26144610
+> Women's empowerment in tourism: a bibliometric approach
+>
 ```
 
 Salida:
@@ -109,26 +120,23 @@ Salida:
 ```
 ------------------------------------------------------------
 DOI: 10.3390/s26144610
+  Titulo:               LLM-Mediated Smart Tele-Primary Care for Rural Older Adults
+  Revista:              Sensors
   Anio:                 2026
   Fecha de publicacion: julio 2026
-  Revista:              Sensors
-  Indexacion:           Q1 (2025)
+  Cuartil:              Q1 (2025)
+  ISSN:                 1424-8220
   Enlace:               https://www.mdpi.com/1424-8220/26/14/4610
-------------------------------------------------------------
-
-------------------------------------------------------------
-DOI: 10.1038/s41586-020-2649-2
-  Anio:                 2020
-  Fecha de publicacion: septiembre 2020
-  Revista:              Nature
-  Indexacion:           Q1
-  Enlace:               https://www.nature.com/articles/s41586-020-2649-2
 ------------------------------------------------------------
 ```
 
-> **Tip:** puedes pegar los DOI en cualquier formato; el programa limpia los prefijos
-> `https://doi.org/...` y `doi:` automáticamente. También acepta varios DOI separados
-> por espacios o comas en una misma línea.
+> **Tip:** puedes pegar los identificadores en cualquier formato; el programa limpia
+> los prefijos `https://doi.org/...` y `doi:` automáticamente. Si en una línea pones
+> **varios DOI**, los parte en varios; si no, la línea completa se trata como un título.
+> Puedes mezclar DOI y títulos en la misma consulta.
+>
+> **Fecha:** Crossref trae mes en `published-print`, `published-online` o `issued`.
+> Si ninguno tiene mes, se muestra **solo el año** (no se inventa fecha).
 
 ---
 
@@ -136,31 +144,35 @@ DOI: 10.1038/s41586-020-2649-2
 
 La búsqueda del cuartil es **escalonada**:
 
-1. **ISSN + año exacto.** Se prueba cada ISSN de la revista (impreso y electrónico).
+1. **ISSN + año exacto.** Se prueba cada ISSN de la obra (revista, serie o libro).
 2. **ISSN + año más cercano.** Si no hay cuartil en el año exacto, se usa el año más
    cercano de esa revista, con preferencia por el más reciente **≤ año de publicación**.
    Solo se permite hasta **3 años de diferencia** (`MAX_GAP_ANIOS`). Cuando el año del
    cuartil no coincide, se anota entre paréntesis: **`Q1 (2025)`**.
    - Esto cubre el **rezago de Scimago**, que publica sus datos con ~1 año de retraso
      (p. ej. un artículo de 2026 usa el cuartil de 2025).
-3. **Sin coincidencia → `REVISAR`.**
+3. **Sin coincidencia:** si la obra es de un tipo que Scimago no cubre (libros,
+   reportes, etc.) se marca **`Sin cuartil`**; en los demás casos, **`REVISAR`**.
 
-Casos especiales:
+Caso especial:
 
 | Situación | Resultado |
 | --- | --- |
 | Artículo de revista o congreso con cuartil | `Q1` / `Q2` / `Q3` / `Q4` |
 | Cuartil de otro año (rezago de Scimago) | `Q1 (2025)` |
-| **Libro o capítulo de libro** | `otro` |
-| Revista **no indexada** en Scimago | `REVISAR` |
+| **Libro o capítulo** con ISSN de serie indexada | `Q1` .. `Q4` |
+| **Libro o capítulo** sin ISSN indexado en Scimago | `Sin cuartil` |
+| Revista no indexada en Scimago (artículo/congreso) | `REVISAR` |
 | Artículo **sin ISSN** (típico en algunos congresos) | `REVISAR` |
 | Dato más antiguo que el límite de 3 años | `REVISAR` |
 | DOI **inexistente** en Crossref | `REVISAR` |
+| Título sin resultados en Crossref | `REVISAR` |
 
 > **Nota:** Scimago solo cubre revistas y algunas memorias de congreso. Muchos papers
 > de congreso de IEEE (tipo `proceedings-article`) **no están indexados** en Scimago y
 > no tienen ISSN, por lo que aparecerán como `REVISAR`. Eso es correcto: Scimago no
-> tiene ese dato.
+> tiene ese dato. Para los **libros**, Crossref suele asociar un ISSN de la serie; si
+> ese ISSN está en Scimago, el libro **sí** recibe cuartil.
 
 ---
 
@@ -237,7 +249,7 @@ Metadatos-DOI/
 | `ANIO_INICIO` / `ANIO_FIN` | Rango de años de Scimago a descargar (por defecto 1999–2025). |
 | `MAX_GAP_ANIOS` | Máxima diferencia de años permitida al buscar el cuartil cercano (por defecto 3). |
 | `TIPOS_SIN_CUARTIL` | Tipos de obra de Crossref que no llevan cuartil (libros, capítulos, etc.). |
-| `VALOR_SIN_CUARTIL` / `VALOR_REVISAR` | Marcadores `otro` y `REVISAR`. |
+| `VALOR_SIN_CUARTIL` / `VALOR_REVISAR` | Marcadores `Sin cuartil` y `REVISAR`. |
 | `MESES_ES` | Nombres de los meses en español. |
 
 ---
@@ -279,3 +291,57 @@ No. Son consultas estructuradas (Crossref + Scimago). Sin alucinaciones.
   reales. Si algún año falla, el script reintenta 3 veces.
 - El índice local en SQLite (`WITHOUT ROWID`) evita depender de la web de Scimago en
   cada consulta, es liviano (~24 MB) y hace las búsquedas instantáneas.
+
+---
+
+## Historial de mejoras
+
+### Búsqueda por DOI o por título (versión actual)
+
+Antes solo se podía buscar por DOI. Ahora también por **título del artículo**, y de
+paso salen **más datos** por cada obra.
+
+**Qué se intentó implementar (y qué pasó):**
+
+| Intento | Resultado | Decisión |
+| --- | --- | --- |
+| Buscar por **ISSN** | Crossref devolvía la **revista**, no un artículo; el campo `title` de `/journals/{issn}` viene como **texto** (no lista) y mostraba solo la primera letra. | **Se eliminó** la búsqueda por ISSN. |
+| Buscar por **ISBN** | Crossref devolvía 20 resultados arbitrarios; el primero solía ser un **capítulo**, no el libro real. | **Se eliminó** la búsqueda por ISBN. |
+| Buscar por **título** con `query.bibliographic` | El artículo correcto **no aparecía** ni en el top 5. | Se cambió a **`query.title`** con `rows=1`. |
+| Buscar por **título** con `query.title` | Devuelve el artículo correcto como **primera** coincidencia. | **Se adoptó.** |
+| Fecha sin mes | Crossref a veces no trae mes (solo el año, p. ej. `2024`). | Si no hay mes, se muestra **solo el año** (no se inventa). |
+
+**Problemas encontrados y corregidos:**
+
+- Un bug en `primer_texto` hacía que el nombre de la revista saliera como **"S"**
+  (porque `container-title` es una **lista** y se estaba indexando mal). Se corrigió.
+- El parser de la caja de texto separaba por espacios, lo que **rompía los títulos**.
+  Se reemplazó por un parser **por líneas**: una línea = un DOI o un título. Si en una
+  línea hay **varios DOI**, se parten; si no, la línea entera se trata como título.
+- Si el título consultado **no existe**, Crossref igual devuelve algo poco parecido.
+  Se agregó un aviso automático: **`Coincidencia debil: ... Verifica que sea el articulo correcto`**
+  (comparación de similitud con `difflib`, umbral `UMBRAL_SIMILITUD_TITULO = 0.55`).
+
+**Mejoras que quedaron (lo nuevo):**
+
+- **Búsqueda por título**: pegas el nombre del artículo y la app resuelve el DOI y sus datos.
+- **Más datos por tarjeta**: `Titulo`, `Revista`, `Año`, `Fecha`, `Cuartil`, `ISSN`, `ISBN` y `Enlace`.
+- **Aviso de coincidencia débil** cuando el título no se parece al resultado de Crossref.
+- **Regla de fecha honesta**: mes y año si existe; **solo año** si Crossref no trae mes.
+- Etiqueta **`Cuartil:`** (antes `Indexacion:`) y valores **`Sin cuartil`** / **`REVISAR`**.
+- Cada tarjeta tiene **barra lateral** verde (obtuvo cuartil) o roja (no lo obtuvo),
+  y un botón **copiar** individual por cada campo (y **Abrir** en el enlace).
+
+---
+
+## Estructura de salida del build
+
+Al construir con PyInstaller se genera:
+
+```
+dist/
+└─ MetaDOI.exe        # un solo archivo (~20 MB), sin instalar Python
+```
+
+Basta con entregar **`dist/MetaDOI.exe`**: la base de Scimago viaja embebida dentro del
+ejecutable y no requiere archivos externos.

@@ -2,11 +2,14 @@
 """
 buscar_doi.py
 =============
-Le das uno o varios DOI y devuelve, por cada uno, una lista con:
-    - Anio
-    - Fecha de publicacion / creacion
+Le das uno o varios DOI o titulos de articulo (uno por linea) y devuelve, por
+cada consulta, una lista con:
+    - Titulo
     - Revista
-    - Indexacion (cuartil Q1..Q4)
+    - Anio
+    - Fecha de publicacion (solo anio si Crossref no trae mes)
+    - Cuartil (Q1..Q4, "Sin cuartil" o "REVISAR")
+    - ISSN / ISBN
     - Enlace
 
 Los datos bibliograficos salen de Crossref; el cuartil, del indice local
@@ -17,7 +20,6 @@ Uso:
     python buscar_doi.py
 """
 
-import re
 import sys
 
 import requests
@@ -26,74 +28,72 @@ import requests
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from config import LINEA, VALOR_REVISAR
+from config import LINEA
 from nucleo import (
     conectar_indice,
-    construir_resultado,
-    consultar_crossref,
-    limpiar_doi,
+    detectar_tipo,
+    parsear_entradas,
+    resolver_entrada,
 )
 
+PREFIJO = {"doi": "DOI", "titulo": "Consulta"}
 
-def mostrar(resultado):
+
+def mostrar(r):
     print(LINEA)
-    print("DOI: %s" % resultado["doi"])
-    print("  %-21s %s" % ("Anio:", resultado["anio"]))
-    print("  %-21s %s" % ("Fecha de publicacion:", resultado["fecha"]))
-    print("  %-21s %s" % ("Revista:", resultado["revista"]))
-    print("  %-21s %s" % ("Indexacion:", resultado["indexacion"]))
-    print("  %-21s %s" % ("Enlace:", resultado["enlace"]))
+    print("%s: %s" % (PREFIJO.get(r.get("tipo"), "DOI"), r.get("identificador")))
+    print("  %-21s %s" % ("Titulo:", r.get("titulo")))
+    print("  %-21s %s" % ("Revista:", r.get("revista")))
+    print("  %-21s %s" % ("Anio:", r.get("anio")))
+    print("  %-21s %s" % ("Fecha de publicacion:", r.get("fecha")))
+    print("  %-21s %s" % ("Cuartil:", r.get("indexacion")))
+    if r.get("issn"):
+        print("  %-21s %s" % ("ISSN:", r["issn"]))
+    if r.get("isbn"):
+        print("  %-21s %s" % ("ISBN:", r["isbn"]))
+    print("  %-21s %s" % ("Enlace:", r.get("enlace")))
     print(LINEA)
 
 
-def leer_dois():
-    """Lee DOI(s) de consola hasta una linea vacia."""
-    print("Pega el/los DOI (uno por linea). ENTER en vacio para terminar.\n")
-    dois = []
+def error_no_resuelto(entrada, nota):
+    print(LINEA)
+    print("%s: %s" % (PREFIJO.get(detectar_tipo(entrada) or "titulo", "Consulta"), entrada))
+    print("  (!) %s" % nota)
+    print(LINEA)
+
+
+def leer_entradas():
+    """Lee lineas (cada una, un DOI o un titulo) hasta una linea vacia."""
+    print("Pega uno o varios DOI o titulos de articulo, uno por linea.")
+    print("ENTER en vacio para terminar.\n")
+    lineas = []
     while True:
         try:
-            linea = input("DOI > ")
+            linea = input("> ")
         except EOFError:
             break
         if not linea.strip():
             break
-        for token in re.split(r"[\s,;]+", linea):
-            doi = limpiar_doi(token)
-            if doi and doi not in dois:
-                dois.append(doi)
-    return dois
+        lineas.append(linea)
+    return parsear_entradas("\n".join(lineas))
 
 
 def main():
-    dois = leer_dois()
-    if not dois:
-        print("No ingresaste ningun DOI.")
+    entradas = leer_entradas()
+    if not entradas:
+        print("No ingresaste ningun DOI ni titulo.")
         return
 
     conexion = conectar_indice()
 
-    for doi in dois:
+    for entrada in entradas:
         print()
         try:
-            mensaje = consultar_crossref(doi)
+            mostrar(resolver_entrada(entrada, conexion))
         except LookupError as error:
-            mostrar(
-                {
-                    "doi": doi,
-                    "anio": VALOR_REVISAR,
-                    "fecha": VALOR_REVISAR,
-                    "revista": VALOR_REVISAR,
-                    "indexacion": VALOR_REVISAR,
-                    "enlace": "https://doi.org/%s" % doi,
-                }
-            )
-            print("  (!) %s" % error)
-            continue
+            error_no_resuelto(entrada, str(error))
         except requests.RequestException as error:
-            print("%s\n  Error de red al consultar %s: %s" % (LINEA, doi, error))
-            continue
-
-        mostrar(construir_resultado(doi, mensaje, conexion))
+            print("%s\n  Error de red al consultar %s: %s" % (LINEA, entrada, error))
 
 
 if __name__ == "__main__":

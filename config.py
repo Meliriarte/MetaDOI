@@ -67,12 +67,16 @@ CABECERAS_CROSSREF = {
 }
 
 CROSSREF_URL = "https://api.crossref.org/works/%s"
+# Busqueda de articulos por titulo (devuelve la mejor coincidencia).
+CROSSREF_URL_BUSQUEDA = "https://api.crossref.org/works?query.title=%s&rows=1"
 
 # --------------------------------------------------------------------------
 # Reglas de negocio
 # --------------------------------------------------------------------------
-# Tipos de obra de Crossref que NO tienen cuartil en Scimago.
-# (Los articulos de revista y de congreso si lo tienen.)
+# Tipos de obra de Crossref que Scimago no cubre de forma directa (libros,
+# capitulos, reportes, etc.). Aun asi se intenta buscar el cuartil usando el
+# ISSN que Crossref asocia a la serie; si no lo hay (o no se encuentra), el
+# resultado se marca "Sin cuartil".
 TIPOS_SIN_CUARTIL = {
     "book",
     "book-chapter",
@@ -93,9 +97,9 @@ TIPOS_SIN_CUARTIL = {
     "standard",
 }
 
-# Valores especiales de la columna "Indexacion".
-VALOR_SIN_CUARTIL = "otro"   # libros y capitulos de libro
-VALOR_REVISAR = "REVISAR"    # no se pudo localizar el dato
+# Valores especiales de la columna "Cuartil".
+VALOR_SIN_CUARTIL = "Sin cuartil"  # obra confirmada sin cuartil (libros, etc.)
+VALOR_REVISAR = "REVISAR"          # no se pudo localizar el dato
 
 # Cuartiles validos. Scimago usa "-" cuando la revista no tiene cuartil ese
 # anio; ese valor NO es un cuartil y se ignora.
@@ -105,6 +109,11 @@ CUARTILES_VALIDOS = {"Q1", "Q2", "Q3", "Q4"}
 # mas cercano de esa revista (Scimago publica con ~1 anio de rezago). Este es el
 # limite de diferencia permitido; mas alla, se marca REVISAR.
 MAX_GAP_ANIOS = 3
+
+# Al buscar por titulo, Crossref siempre devuelve "la mejor coincidencia", aunque
+# no se parezca al titulo consultado. Si la similitud normalizada queda por debajo
+# de este umbral, se anota un aviso en la tarjeta para que el usuario verifique.
+UMBRAL_SIMILITUD_TITULO = 0.55
 
 # --------------------------------------------------------------------------
 # Meses en espaniol (para "Fecha de publicacion")

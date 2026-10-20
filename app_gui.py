@@ -4,14 +4,13 @@ app_gui.py
 ==========
 Interfaz de escritorio del proyecto MetaDOI (CustomTkinter).
 
-Pegas uno o varios DOI, pulsas "Consultar" y la app devuelve anio, fecha,
-revista, indexacion y enlace de cada publicacion.
+Pegas uno o varios DOI o titulos de articulo (uno por linea), pulsas "Consultar" y
+la app devuelve titulo, revista, anio, fecha, cuartil, ISSN/ISBN y enlace.
 
 Las consultas a Crossref corren en un hilo aparte para no congelar la ventana.
 """
 
 import queue
-import re
 import threading
 import webbrowser
 
@@ -21,19 +20,17 @@ import requests
 from config import BASE_DIR, SCIMAGO_DB, VALOR_REVISAR
 from nucleo import (
     conectar_indice,
-    construir_resultado,
-    consultar_crossref,
-    limpiar_doi,
+    detectar_tipo,
+    parsear_entradas,
+    resolver_entrada,
 )
 
-# Colores del badge de indexacion, uno por cuartil.
-COLORES_INDEXACION = {
-    "Q1": "#1f8f4e",
-    "Q2": "#2f7ed8",
-    "Q3": "#c99a1c",
-    "Q4": "#cc6a2f",
-}
-COLOR_INDEXACION_OTRO = "#5a5f66"  # "otro" / "REVISAR"
+# Colores de la barra vertical de cada tarjeta.
+COLOR_OK = "#1f8f4e"    # se obtuvo el cuartil (Q1..Q4)
+COLOR_NO = "#c0392b"    # no se obtuvo el cuartil (Sin cuartil / REVISAR)
+
+# Prefijo que encabeza cada tarjeta segun lo que se busco.
+PREFIJO = {"doi": "DOI", "titulo": "Consulta"}
 
 # Paleta general.
 GRIS_TEXTO = "#9aa0a6"
@@ -41,25 +38,21 @@ AZUL_ENLACE = "#6ea8fe"
 AMBAR_NOTA = "#e0a030"
 
 
-def parsear_dois(texto):
-    """Separa y limpia los DOI escritos en la caja de texto."""
-    dois = []
-    for token in re.split(r"[\s,;]+", texto):
-        doi = limpiar_doi(token)
-        if doi and doi not in dois:
-            dois.append(doi)
-    return dois
-
-
-def resultado_revisar(doi, nota=None):
-    """Resultado vacio para un DOI que no se pudo resolver."""
+def resultado_revisar(entrada, nota=None):
+    """Resultado vacio para una entrada que no se pudo resolver."""
+    es_doi = detectar_tipo(entrada) == "doi"
     datos = {
-        "doi": doi,
+        "tipo": "doi" if es_doi else "titulo",
+        "identificador": entrada,
+        "titulo": VALOR_REVISAR,
         "anio": VALOR_REVISAR,
         "fecha": VALOR_REVISAR,
         "revista": VALOR_REVISAR,
         "indexacion": VALOR_REVISAR,
-        "enlace": "https://doi.org/%s" % doi,
+        "issn": "",
+        "isbn": "",
+        "enlace": "https://doi.org/%s" % entrada if es_doi else "",
+        "tiene_cuartil": False,
     }
     if nota:
         datos["nota"] = nota
@@ -104,7 +97,7 @@ class App(ctk.CTk):
         ).pack(side="left")
         ctk.CTkLabel(
             cabecera,
-            text="metadatos + cuartil Scimago a partir de DOI",
+            text="metadatos + cuartil Scimago a partir de DOI o titulo",
             text_color=GRIS_TEXTO,
         ).pack(side="left", padx=12, pady=(10, 0))
 
@@ -112,7 +105,7 @@ class App(ctk.CTk):
         panel = ctk.CTkFrame(self, corner_radius=12)
         panel.pack(padx=24, pady=8, fill="x")
         ctk.CTkLabel(
-            panel, text="Pega uno o varios DOI (uno por linea):", anchor="w"
+            panel, text="Pega uno o varios DOI o titulos de articulo (uno por linea):", anchor="w"
         ).pack(padx=16, pady=(14, 4), anchor="w")
         self.caja = ctk.CTkTextbox(panel, height=84, corner_radius=8)
         self.caja.pack(padx=16, pady=(0, 12), fill="x")
@@ -166,9 +159,9 @@ class App(ctk.CTk):
         if self.consultando:
             return
 
-        dois = parsear_dois(self.caja.get("1.0", "end"))
-        if not dois:
-            self.estado.configure(text="No ingresaste ningun DOI.")
+        identificadores = parsear_entradas(self.caja.get("1.0", "end"))
+        if not identificadores:
+            self.estado.configure(text="No ingresaste ningun DOI ni titulo.")
             return
         if not SCIMAGO_DB.exists():
             self.estado.configure(
@@ -182,23 +175,25 @@ class App(ctk.CTk):
         self.boton.configure(state="disabled")
         self.boton_copiar.configure(state="disabled")
         self.progreso.set(0)
-        self.estado.configure(text="Consultando 0 de %d ..." % len(dois))
-        threading.Thread(target=self._trabajar, args=(dois,), daemon=True).start()
+        self.estado.configure(text="Consultando 0 de %d ..." % len(identificadores))
+        threading.Thread(target=self._trabajar, args=(identificadores,), daemon=True).start()
         self.after(120, self._revisar_cola)
 
-    def _trabajar(self, dois):
-        """Consulta Crossref en un hilo aparte; manda eventos a la cola."""
+    def _trabajar(self, identificadores):
+        """Resuelve cada DOI o titulo en un hilo aparte; manda eventos a la cola."""
         conexion = conectar_indice()
         try:
-            for indice, doi in enumerate(dois, 1):
-                self.cola.put(("progreso", indice, len(dois)))
+            for indice, entrada in enumerate(identificadores, 1):
+                self.cola.put(("progreso", indice, len(identificadores)))
                 try:
-                    mensaje = consultar_crossref(doi)
-                    self.cola.put(("tarjeta", construir_resultado(doi, mensaje, conexion)))
+                    resultado = resolver_entrada(entrada, conexion)
+                    self.cola.put(("tarjeta", resultado))
                 except LookupError as error:
-                    self.cola.put(("tarjeta", resultado_revisar(doi, str(error))))
+                    self.cola.put(("tarjeta", resultado_revisar(entrada, str(error))))
                 except requests.RequestException as error:
-                    self.cola.put(("tarjeta", resultado_revisar(doi, "Error de red: %s" % error)))
+                    self.cola.put(
+                        ("tarjeta", resultado_revisar(entrada, "Error de red: %s" % error))
+                    )
         finally:
             conexion.close()
             self.cola.put(("fin",))
@@ -228,82 +223,116 @@ class App(ctk.CTk):
         if self.consultando:
             self.after(120, self._revisar_cola)
 
-    def _badge(self, padre, indexacion):
-        """Etiqueta de color segun el cuartil (Q1..Q4) o gris para otro/REVISAR."""
-        base = indexacion.split(" ")[0] if indexacion else ""
-        color = COLORES_INDEXACION.get(base, COLOR_INDEXACION_OTRO)
-        marco = ctk.CTkFrame(padre, fg_color=color, corner_radius=8)
-        ctk.CTkLabel(
-            marco,
-            text=indexacion,
-            text_color="white",
-            font=ctk.CTkFont(size=12, weight="bold"),
-        ).pack(padx=10, pady=3)
-        return marco
-
     def _tarjeta(self, resultado):
         self.ultimos.append(resultado)
 
         tarjeta = ctk.CTkFrame(self.resultados, corner_radius=12)
         tarjeta.pack(fill="x", padx=6, pady=6)
-        tarjeta.columnconfigure(0, weight=1)
+        tarjeta.columnconfigure(0, weight=0)
+        tarjeta.columnconfigure(1, weight=1)
 
-        # Fila superior: DOI + badge.
-        cab = ctk.CTkFrame(tarjeta, fg_color="transparent")
-        cab.grid(row=0, column=0, sticky="ew", padx=16, pady=(12, 6))
-        cab.columnconfigure(0, weight=1)
-        ctk.CTkLabel(
-            cab, text=resultado["doi"], font=ctk.CTkFont(size=15, weight="bold")
-        ).grid(row=0, column=0, sticky="w")
-        self._badge(cab, resultado["indexacion"]).grid(row=0, column=1, sticky="e")
-
-        # Campos alineados.
-        campos = ctk.CTkFrame(tarjeta, fg_color="transparent")
-        campos.grid(row=1, column=0, sticky="ew", padx=16, pady=(0, 8))
-        campos.columnconfigure(1, weight=1)
-        filas = (
-            ("Anio", resultado["anio"]),
-            ("Fecha", resultado["fecha"]),
-            ("Revista", resultado["revista"]),
+        # Barra vertical de estado a la izquierda: verde si hay cuartil, rojo si no.
+        color_barra = COLOR_OK if resultado.get("tiene_cuartil") else COLOR_NO
+        ctk.CTkFrame(tarjeta, fg_color=color_barra, corner_radius=6, width=8).grid(
+            row=0, column=0, sticky="ns", padx=(6, 0), pady=8
         )
-        for i, (nombre, valor) in enumerate(filas):
-            ctk.CTkLabel(
-                campos, text=nombre, text_color=GRIS_TEXTO, width=64, anchor="w"
-            ).grid(row=i, column=0, sticky="w", pady=1)
-            ctk.CTkLabel(
-                campos, text=valor, anchor="w", justify="left", wraplength=560
-            ).grid(row=i, column=1, sticky="w", pady=1)
 
-        # Enlace + boton Abrir.
-        fila_enlace = ctk.CTkFrame(tarjeta, fg_color="transparent")
-        fila_enlace.grid(row=2, column=0, sticky="ew", padx=16, pady=(0, 6))
+        # Contenido de la tarjeta.
+        contenido = ctk.CTkFrame(tarjeta, fg_color="transparent")
+        contenido.grid(row=0, column=1, sticky="nsew", padx=(10, 14), pady=(12, 12))
+        contenido.columnconfigure(0, weight=0)
+        contenido.columnconfigure(1, weight=1)
+        contenido.columnconfigure(2, weight=0)
+
+        # Encabezado: tipo + identificador.
+        prefijo = PREFIJO.get(resultado.get("tipo"), "DOI")
         ctk.CTkLabel(
-            fila_enlace, text="Enlace", text_color=GRIS_TEXTO, width=64, anchor="w"
-        ).pack(side="left")
-        ctk.CTkButton(
-            fila_enlace,
-            text="Abrir",
-            width=64,
-            height=26,
-            command=lambda u=resultado["enlace"]: webbrowser.open(u),
-        ).pack(side="right")
+            contenido,
+            text="%s: %s" % (prefijo, resultado.get("identificador", "")),
+            font=ctk.CTkFont(size=15, weight="bold"),
+        ).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 4))
+
+        # Campos alineados, cada uno con su boton "copiar".
+        filas = [
+            ("Titulo", resultado.get("titulo") or VALOR_REVISAR),
+            ("Revista", resultado.get("revista") or VALOR_REVISAR),
+            ("Anio", resultado.get("anio") or VALOR_REVISAR),
+            ("Fecha", resultado.get("fecha") or VALOR_REVISAR),
+            ("Cuartil", resultado.get("indexacion") or VALOR_REVISAR),
+        ]
+        if resultado.get("issn"):
+            filas.append(("ISSN", resultado["issn"]))
+        if resultado.get("isbn"):
+            filas.append(("ISBN", resultado["isbn"]))
+
+        for i, (nombre, valor) in enumerate(filas, start=1):
+            ctk.CTkLabel(
+                contenido, text=nombre, text_color=GRIS_TEXTO, width=64, anchor="w"
+            ).grid(row=i, column=0, sticky="w", pady=1)
+            extra = {}
+            if nombre == "Cuartil":
+                extra = {
+                    "text_color": COLOR_OK if resultado.get("tiene_cuartil") else COLOR_NO,
+                    "font": ctk.CTkFont(size=13, weight="bold"),
+                }
+            ctk.CTkLabel(
+                contenido, text=valor, anchor="w", justify="left", wraplength=440, **extra
+            ).grid(row=i, column=1, sticky="w", pady=1)
+            self._boton_copiar(contenido, valor).grid(
+                row=i, column=2, sticky="w", padx=(8, 0), pady=1
+            )
+
+        # Enlace: valor + copiar + Abrir.
+        fila_enlace = len(filas) + 1
         ctk.CTkLabel(
-            fila_enlace,
-            text=resultado["enlace"],
-            text_color=AZUL_ENLACE,
+            contenido, text="Enlace", text_color=GRIS_TEXTO, width=64, anchor="w"
+        ).grid(row=fila_enlace, column=0, sticky="w", pady=1)
+        enlace = resultado.get("enlace") or ""
+        ctk.CTkLabel(
+            contenido,
+            text=enlace or VALOR_REVISAR,
+            text_color=AZUL_ENLACE if enlace else GRIS_TEXTO,
             anchor="w",
             justify="left",
-            wraplength=460,
-        ).pack(side="left", padx=(0, 8))
+            wraplength=380,
+        ).grid(row=fila_enlace, column=1, sticky="w", pady=1)
+        acciones = ctk.CTkFrame(contenido, fg_color="transparent")
+        acciones.grid(row=fila_enlace, column=2, sticky="w", padx=(8, 0), pady=1)
+        if enlace:
+            self._boton_copiar(acciones, enlace).pack(side="left")
+            ctk.CTkButton(
+                acciones,
+                text="Abrir",
+                width=52,
+                height=20,
+                command=lambda u=enlace: webbrowser.open(u),
+            ).pack(side="left", padx=(6, 0))
 
         if resultado.get("nota"):
             ctk.CTkLabel(
-                tarjeta,
+                contenido,
                 text="(!) %s" % resultado["nota"],
                 text_color=AMBAR_NOTA,
                 anchor="w",
-                wraplength=600,
-            ).grid(row=3, column=0, sticky="w", padx=16, pady=(0, 10))
+                wraplength=520,
+            ).grid(row=fila_enlace + 1, column=0, columnspan=3, sticky="w", pady=(6, 0))
+
+    def _boton_copiar(self, padre, valor):
+        """Boton pequeno que copia un solo dato al portapapeles."""
+        return ctk.CTkButton(
+            padre,
+            text="copiar",
+            width=52,
+            height=20,
+            fg_color="gray35",
+            hover_color="gray25",
+            command=lambda v=valor: self._copiar_dato(v),
+        )
+
+    def _copiar_dato(self, valor):
+        self.clipboard_clear()
+        self.clipboard_append(valor)
+        self.estado.configure(text="Dato copiado al portapapeles.")
 
     def _vaciar(self):
         for hijo in self.resultados.winfo_children():
@@ -312,12 +341,18 @@ class App(ctk.CTk):
     def copiar(self):
         lineas = []
         for r in self.ultimos:
-            lineas.append("DOI: %s" % r["doi"])
-            lineas.append("  Anio: %s" % r["anio"])
-            lineas.append("  Fecha de publicacion: %s" % r["fecha"])
-            lineas.append("  Revista: %s" % r["revista"])
-            lineas.append("  Indexacion: %s" % r["indexacion"])
-            lineas.append("  Enlace: %s" % r["enlace"])
+            prefijo = PREFIJO.get(r.get("tipo"), "DOI")
+            lineas.append("%s: %s" % (prefijo, r.get("identificador")))
+            lineas.append("  Titulo: %s" % r.get("titulo"))
+            lineas.append("  Revista: %s" % r.get("revista"))
+            lineas.append("  Anio: %s" % r.get("anio"))
+            lineas.append("  Fecha de publicacion: %s" % r.get("fecha"))
+            lineas.append("  Cuartil: %s" % r.get("indexacion"))
+            if r.get("issn"):
+                lineas.append("  ISSN: %s" % r["issn"])
+            if r.get("isbn"):
+                lineas.append("  ISBN: %s" % r["isbn"])
+            lineas.append("  Enlace: %s" % r.get("enlace"))
             lineas.append("")
         self.clipboard_clear()
         self.clipboard_append("\n".join(lineas))
