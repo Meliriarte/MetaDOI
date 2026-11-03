@@ -101,6 +101,31 @@ TIPOS_SIN_CUARTIL = {
 VALOR_SIN_CUARTIL = "Sin cuartil"  # obra confirmada sin cuartil (libros, etc.)
 VALOR_REVISAR = "REVISAR"          # no se pudo localizar el dato
 
+# Traduccion de los tipos de obra de Crossref (campo 'type') para mostrarlos
+# legibles. Si un tipo no esta en el mapa, se muestra tal cual.
+TIPOS_OBRA_ES = {
+    "journal-article": "Articulo",
+    "proceedings-article": "Articulo de congreso",
+    "book": "Libro",
+    "edited-book": "Libro editado",
+    "monograph": "Monografia",
+    "reference-book": "Libro de referencia",
+    "reference-entry": "Entrada de referencia",
+    "book-chapter": "Capitulo de libro",
+    "book-part": "Parte de libro",
+    "book-section": "Seccion de libro",
+    "book-track": "Track de libro",
+    "dissertation": "Tesis",
+    "report": "Informe",
+    "standard": "Norma",
+    "dataset": "Dataset",
+    "posted-content": "Preprint",
+    "peer-review": "Revision",
+    "component": "Componente",
+    "grant": "Proyecto",
+    "other": "Otro",
+}
+
 # Cuartiles validos. Scimago usa "-" cuando la revista no tiene cuartil ese
 # anio; ese valor NO es un cuartil y se ignora.
 CUARTILES_VALIDOS = {"Q1", "Q2", "Q3", "Q4"}

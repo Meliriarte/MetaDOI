@@ -29,6 +29,7 @@ from config import (
     MAX_GAP_ANIOS,
     MESES_ES,
     SCIMAGO_DB,
+    TIPOS_OBRA_ES,
     TIPOS_SIN_CUARTIL,
     UMBRAL_SIMILITUD_TITULO,
     VALOR_REVISAR,
@@ -235,6 +236,28 @@ def formatear_fecha(partes):
     return str(anio)
 
 
+def formatear_autores(valor):
+    """Lista de autores de Crossref -> 'Apellido, Nombre; Apellido, Nombre'.
+
+    Soporta autores institucionales (solo traen 'name') y omite los vacios.
+    """
+    nombres = []
+    for autor in valor or []:
+        if not isinstance(autor, dict):
+            continue
+        familia = (autor.get("family") or "").strip()
+        nombre = (autor.get("given") or "").strip()
+        if familia and nombre:
+            nombres.append("%s, %s" % (familia, nombre))
+        elif familia:
+            nombres.append(familia)
+        elif nombre:
+            nombres.append(nombre)
+        elif autor.get("name"):
+            nombres.append(str(autor["name"]).strip())
+    return "; ".join(nombres)
+
+
 # --------------------------------------------------------------------------
 # Resultados
 # --------------------------------------------------------------------------
@@ -252,7 +275,9 @@ def construir_resultado(doi, mensaje, conexion, enlace=None):
     issns = normalizar_issn(", ".join(mensaje.get("ISSN") or []))
     isbns = [b for b in (mensaje.get("ISBN") or []) if b]
 
-    tipo_obra = (mensaje.get("type") or "").strip().lower()
+    tipo_crossref = (mensaje.get("type") or "").strip().lower()
+    tipo_obra = TIPOS_OBRA_ES.get(tipo_crossref, tipo_crossref)
+    autores = formatear_autores(mensaje.get("author"))
 
     # Cuartil: se intenta siempre que haya ISSN y anio.
     indexacion = VALOR_REVISAR
@@ -264,7 +289,7 @@ def construir_resultado(doi, mensaje, conexion, enlace=None):
             else:
                 # Se anota el anio real del cuartil cuando difiere.
                 indexacion = "%s (%s)" % (cuartil, anio_cuartil)
-        elif tipo_obra in TIPOS_SIN_CUARTIL:
+        elif tipo_crossref in TIPOS_SIN_CUARTIL:
             # Obra que Scimago no cubre y no se encontro cuartil.
             indexacion = VALOR_SIN_CUARTIL
 
@@ -281,6 +306,8 @@ def construir_resultado(doi, mensaje, conexion, enlace=None):
         "tipo": "doi",
         "identificador": doi,
         "titulo": titulo or VALOR_REVISAR,
+        "autores": autores,
+        "tipo_obra": tipo_obra,
         "anio": str(anio) if anio else VALOR_REVISAR,
         "fecha": formatear_fecha(fecha) or VALOR_REVISAR,
         "revista": revista or VALOR_REVISAR,

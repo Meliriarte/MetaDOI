@@ -12,6 +12,7 @@ Las consultas a Crossref corren en un hilo aparte para no congelar la ventana.
 
 import queue
 import threading
+import tkinter
 import webbrowser
 
 import customtkinter as ctk
@@ -38,6 +39,29 @@ AZUL_ENLACE = "#6ea8fe"
 AMBAR_NOTA = "#e0a030"
 
 
+def lineas_resultado(r):
+    """Texto completo de una tarjeta, con etiquetas (para copiar)."""
+    prefijo = PREFIJO.get(r.get("tipo"), "DOI")
+    lineas = ["%s: %s" % (prefijo, r.get("identificador", ""))]
+    lineas.append("  Titulo: %s" % r.get("titulo"))
+    if r.get("autores"):
+        lineas.append("  Autores: %s" % r["autores"])
+    if r.get("tipo_obra"):
+        lineas.append("  Tipo de obra: %s" % r["tipo_obra"])
+    lineas.append("  Revista: %s" % r.get("revista"))
+    lineas.append("  Anio: %s" % r.get("anio"))
+    lineas.append("  Fecha de publicacion: %s" % r.get("fecha"))
+    lineas.append("  Cuartil: %s" % r.get("indexacion"))
+    if r.get("issn"):
+        lineas.append("  ISSN: %s" % r["issn"])
+    if r.get("isbn"):
+        lineas.append("  ISBN: %s" % r["isbn"])
+    lineas.append("  Enlace: %s" % r.get("enlace"))
+    if r.get("nota"):
+        lineas.append("  Nota: %s" % r["nota"])
+    return lineas
+
+
 def resultado_revisar(entrada, nota=None):
     """Resultado vacio para una entrada que no se pudo resolver."""
     es_doi = detectar_tipo(entrada) == "doi"
@@ -45,6 +69,8 @@ def resultado_revisar(entrada, nota=None):
         "tipo": "doi" if es_doi else "titulo",
         "identificador": entrada,
         "titulo": VALOR_REVISAR,
+        "autores": "",
+        "tipo_obra": "",
         "anio": VALOR_REVISAR,
         "fecha": VALOR_REVISAR,
         "revista": VALOR_REVISAR,
@@ -82,6 +108,15 @@ class App(ctk.CTk):
         if ruta.exists():
             try:
                 self.iconbitmap(str(ruta))
+                return
+            except Exception:
+                pass
+        # Respaldo: si el .ico no esta, usar el PNG para el icono de la ventana.
+        ruta_png = BASE_DIR / "logo.png"
+        if ruta_png.exists():
+            try:
+                self._icono_png = tkinter.PhotoImage(file=str(ruta_png))
+                self.iconphoto(True, self._icono_png)
             except Exception:
                 pass
 
@@ -92,6 +127,25 @@ class App(ctk.CTk):
         # Encabezado.
         cabecera = ctk.CTkFrame(self, fg_color="transparent")
         cabecera.pack(padx=24, pady=(18, 4), fill="x")
+
+        # Logo (si existe) a la izquierda del texto. Se usa PhotoImage nativo
+        # para no depender de Pillow dentro del .exe.
+        self._logo_img = None
+        ruta_logo = BASE_DIR / "logo.png"
+        if ruta_logo.exists():
+            try:
+                self._logo_img = tkinter.PhotoImage(file=str(ruta_logo))
+                fondo = self._apply_appearance_mode(self.cget("fg_color"))
+                tkinter.Label(
+                    cabecera,
+                    image=self._logo_img,
+                    bd=0,
+                    highlightthickness=0,
+                    bg=fondo,
+                ).pack(side="left", padx=(0, 10))
+            except Exception:
+                self._logo_img = None
+
         ctk.CTkLabel(
             cabecera, text="MetaDOI", font=ctk.CTkFont(size=28, weight="bold")
         ).pack(side="left")
@@ -244,22 +298,37 @@ class App(ctk.CTk):
         contenido.columnconfigure(1, weight=1)
         contenido.columnconfigure(2, weight=0)
 
-        # Encabezado: tipo + identificador.
+        # Encabezado: tipo + identificador y boton para copiar la tarjeta completa.
         prefijo = PREFIJO.get(resultado.get("tipo"), "DOI")
         ctk.CTkLabel(
             contenido,
             text="%s: %s" % (prefijo, resultado.get("identificador", "")),
             font=ctk.CTkFont(size=15, weight="bold"),
-        ).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 4))
+        ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 4))
+        ctk.CTkButton(
+            contenido,
+            text="Copiar todo",
+            width=92,
+            height=24,
+            fg_color="gray35",
+            hover_color="gray25",
+            command=lambda r=resultado: self._copiar_dato(
+                "\n".join(lineas_resultado(r)), "Tarjeta copiada al portapapeles."
+            ),
+        ).grid(row=0, column=2, sticky="e", pady=(0, 4))
 
-        # Campos alineados, cada uno con su boton "copiar".
-        filas = [
-            ("Titulo", resultado.get("titulo") or VALOR_REVISAR),
+        # Campos alineados.
+        filas = [("Titulo", resultado.get("titulo") or VALOR_REVISAR)]
+        if resultado.get("autores"):
+            filas.append(("Autores", resultado["autores"]))
+        if resultado.get("tipo_obra"):
+            filas.append(("Tipo de obra", resultado["tipo_obra"]))
+        filas.extend([
             ("Revista", resultado.get("revista") or VALOR_REVISAR),
             ("Anio", resultado.get("anio") or VALOR_REVISAR),
             ("Fecha", resultado.get("fecha") or VALOR_REVISAR),
             ("Cuartil", resultado.get("indexacion") or VALOR_REVISAR),
-        ]
+        ])
         if resultado.get("issn"):
             filas.append(("ISSN", resultado["issn"]))
         if resultado.get("isbn"):
@@ -267,7 +336,7 @@ class App(ctk.CTk):
 
         for i, (nombre, valor) in enumerate(filas, start=1):
             ctk.CTkLabel(
-                contenido, text=nombre, text_color=GRIS_TEXTO, width=64, anchor="w"
+                contenido, text=nombre, text_color=GRIS_TEXTO, width=88, anchor="w"
             ).grid(row=i, column=0, sticky="w", pady=1)
             extra = {}
             if nombre == "Cuartil":
@@ -276,16 +345,13 @@ class App(ctk.CTk):
                     "font": ctk.CTkFont(size=13, weight="bold"),
                 }
             ctk.CTkLabel(
-                contenido, text=valor, anchor="w", justify="left", wraplength=440, **extra
-            ).grid(row=i, column=1, sticky="w", pady=1)
-            self._boton_copiar(contenido, valor).grid(
-                row=i, column=2, sticky="w", padx=(8, 0), pady=1
-            )
+                contenido, text=valor, anchor="w", justify="left", wraplength=500, **extra
+            ).grid(row=i, column=1, columnspan=2, sticky="w", pady=1)
 
-        # Enlace: valor + copiar + Abrir.
+        # Enlace + boton Abrir.
         fila_enlace = len(filas) + 1
         ctk.CTkLabel(
-            contenido, text="Enlace", text_color=GRIS_TEXTO, width=64, anchor="w"
+            contenido, text="Enlace", text_color=GRIS_TEXTO, width=88, anchor="w"
         ).grid(row=fila_enlace, column=0, sticky="w", pady=1)
         enlace = resultado.get("enlace") or ""
         ctk.CTkLabel(
@@ -294,19 +360,16 @@ class App(ctk.CTk):
             text_color=AZUL_ENLACE if enlace else GRIS_TEXTO,
             anchor="w",
             justify="left",
-            wraplength=380,
+            wraplength=440,
         ).grid(row=fila_enlace, column=1, sticky="w", pady=1)
-        acciones = ctk.CTkFrame(contenido, fg_color="transparent")
-        acciones.grid(row=fila_enlace, column=2, sticky="w", padx=(8, 0), pady=1)
         if enlace:
-            self._boton_copiar(acciones, enlace).pack(side="left")
             ctk.CTkButton(
-                acciones,
+                contenido,
                 text="Abrir",
                 width=52,
-                height=20,
+                height=22,
                 command=lambda u=enlace: webbrowser.open(u),
-            ).pack(side="left", padx=(6, 0))
+            ).grid(row=fila_enlace, column=2, sticky="e", pady=1)
 
         if resultado.get("nota"):
             ctk.CTkLabel(
@@ -314,25 +377,13 @@ class App(ctk.CTk):
                 text="(!) %s" % resultado["nota"],
                 text_color=AMBAR_NOTA,
                 anchor="w",
-                wraplength=520,
+                wraplength=560,
             ).grid(row=fila_enlace + 1, column=0, columnspan=3, sticky="w", pady=(6, 0))
 
-    def _boton_copiar(self, padre, valor):
-        """Boton pequeno que copia un solo dato al portapapeles."""
-        return ctk.CTkButton(
-            padre,
-            text="copiar",
-            width=52,
-            height=20,
-            fg_color="gray35",
-            hover_color="gray25",
-            command=lambda v=valor: self._copiar_dato(v),
-        )
-
-    def _copiar_dato(self, valor):
+    def _copiar_dato(self, valor, mensaje="Dato copiado al portapapeles."):
         self.clipboard_clear()
         self.clipboard_append(valor)
-        self.estado.configure(text="Dato copiado al portapapeles.")
+        self.estado.configure(text=mensaje)
 
     def _vaciar(self):
         for hijo in self.resultados.winfo_children():
@@ -341,18 +392,7 @@ class App(ctk.CTk):
     def copiar(self):
         lineas = []
         for r in self.ultimos:
-            prefijo = PREFIJO.get(r.get("tipo"), "DOI")
-            lineas.append("%s: %s" % (prefijo, r.get("identificador")))
-            lineas.append("  Titulo: %s" % r.get("titulo"))
-            lineas.append("  Revista: %s" % r.get("revista"))
-            lineas.append("  Anio: %s" % r.get("anio"))
-            lineas.append("  Fecha de publicacion: %s" % r.get("fecha"))
-            lineas.append("  Cuartil: %s" % r.get("indexacion"))
-            if r.get("issn"):
-                lineas.append("  ISSN: %s" % r["issn"])
-            if r.get("isbn"):
-                lineas.append("  ISBN: %s" % r["isbn"])
-            lineas.append("  Enlace: %s" % r.get("enlace"))
+            lineas.extend(lineas_resultado(r))
             lineas.append("")
         self.clipboard_clear()
         self.clipboard_append("\n".join(lineas))

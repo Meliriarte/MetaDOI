@@ -43,6 +43,10 @@ def mostrar(r):
     print(LINEA)
     print("%s: %s" % (PREFIJO.get(r.get("tipo"), "DOI"), r.get("identificador")))
     print("  %-21s %s" % ("Titulo:", r.get("titulo")))
+    if r.get("autores"):
+        print("  %-21s %s" % ("Autores:", r["autores"]))
+    if r.get("tipo_obra"):
+        print("  %-21s %s" % ("Tipo de obra:", r["tipo_obra"]))
     print("  %-21s %s" % ("Revista:", r.get("revista")))
     print("  %-21s %s" % ("Anio:", r.get("anio")))
     print("  %-21s %s" % ("Fecha de publicacion:", r.get("fecha")))

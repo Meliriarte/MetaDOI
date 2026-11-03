@@ -6,6 +6,8 @@ match de Crossref), devuelve una lista con los datos bibliográficos de cada pub
 | Campo | Descripción |
 | --- | --- |
 | **Titulo** | Título del artículo, libro o capítulo. |
+| **Autores** | Autores en formato `Apellido, Nombre`, separados por `;` (si Crossref los trae). |
+| **Tipo de obra** | Artículo, capítulo de libro, libro, monografía, tesis, preprint, etc. |
 | **Año** | Año de publicación. |
 | **Fecha de publicación** | Mes y año (ej. `diciembre 2025`); si Crossref no trae mes, **solo el año**. |
 | **Revista** | Nombre de la revista, congreso o libro. |
@@ -95,8 +97,8 @@ python app_gui.py
 
 Pega uno o varios DOI o títulos de artículo (uno por línea) en la caja de texto y pulsa
 **Consultar**. Los resultados aparecen en tarjetas, cada una con su barra lateral
-(verde si obtuvo cuartil, roja si no) y un botón **copiar** junto a cada campo
-(más **Abrir** en el enlace).
+(verde si obtuvo cuartil, roja si no) y un botón **Copiar todo** que copia la tarjeta
+completa (más **Abrir** en el enlace).
 
 **Consola:**
 
@@ -188,6 +190,8 @@ pyinstaller --noconfirm --windowed --onefile --name MetaDOI ^
   --icon MetaDOI.ico ^
   --collect-all customtkinter ^
   --add-data "datos/scimago.db;datos" ^
+  --add-data "MetaDOI.ico;." ^
+  --add-data "logo.png;." ^
   --exclude-module numpy --exclude-module PIL --exclude-module cryptography ^
   --exclude-module bcrypt --exclude-module setuptools ^
   --exclude-module h2 --exclude-module hpack --exclude-module hyperframe ^
@@ -196,10 +200,14 @@ pyinstaller --noconfirm --windowed --onefile --name MetaDOI ^
 
 - `--onefile` → un solo `dist/MetaDOI.exe` (~20 MB), sin carpetas ni archivos sueltos.
 - `--add-data "datos/scimago.db;datos"` → incrusta el índice de Scimago dentro del `.exe`.
+- `--add-data "MetaDOI.ico;."` → incrusta el icono para la **ventana** (barra de título y
+  barra de tareas). Sin esto, dentro del `.exe` se veía el icono por defecto de CustomTkinter.
+- `--add-data "logo.png;."` → incrusta el logo que se muestra **dentro del encabezado**.
 - `--windowed` → sin ventana de consola.
-- `--icon MetaDOI.ico` → icono del ejecutable.
+- `--icon MetaDOI.ico` → icono del **archivo** `.exe` (Explorador, accesos directos).
 - `--collect-all customtkinter` → incluye los temas/recursos de CustomTkinter.
 - Los `--exclude-module` sacan librerías que no se usan (numpy, PIL, cryptography...).
+  El logo se dibuja con `tkinter.PhotoImage` nativo, por eso **no** hace falta Pillow.
 
 **Distribución:** basta con entregar **`dist/MetaDOI.exe`**. El receptor lo ejecuta y ya;
 no necesita más archivos. La app resuelve la base de datos desde dentro del ejecutable
@@ -223,6 +231,8 @@ Metadatos-DOI/
 ├─ app_gui.py              # interfaz gráfica (CustomTkinter)
 ├─ buscar_doi.py           # interfaz de consola
 ├─ config.py               # configuración central (correo, rutas, reglas)
+├─ MetaDOI.ico             # icono del .exe y de la ventana
+├─ logo.png                # logo que se muestra en el encabezado de la app
 ├─ datos/
 │  └─ scimago.db           # índice local: issn, anio, cuartil
 ├─ requirements.txt        # dependencias (requests, customtkinter)
@@ -249,6 +259,8 @@ Metadatos-DOI/
 | `ANIO_INICIO` / `ANIO_FIN` | Rango de años de Scimago a descargar (por defecto 1999–2025). |
 | `MAX_GAP_ANIOS` | Máxima diferencia de años permitida al buscar el cuartil cercano (por defecto 3). |
 | `TIPOS_SIN_CUARTIL` | Tipos de obra de Crossref que no llevan cuartil (libros, capítulos, etc.). |
+| `TIPOS_OBRA_ES` | Traducción legible de los tipos de obra (`journal-article` → `Articulo`, `book-chapter` → `Capitulo de libro`, etc.). |
+| `UMBRAL_SIMILITUD_TITULO` | Similitud mínima al buscar por título; por debajo se muestra aviso de coincidencia débil (0.55). |
 | `VALOR_SIN_CUARTIL` / `VALOR_REVISAR` | Marcadores `Sin cuartil` y `REVISAR`. |
 | `MESES_ES` | Nombres de los meses en español. |
 
@@ -325,12 +337,37 @@ paso salen **más datos** por cada obra.
 **Mejoras que quedaron (lo nuevo):**
 
 - **Búsqueda por título**: pegas el nombre del artículo y la app resuelve el DOI y sus datos.
-- **Más datos por tarjeta**: `Titulo`, `Revista`, `Año`, `Fecha`, `Cuartil`, `ISSN`, `ISBN` y `Enlace`.
+- **Más datos por tarjeta**: `Titulo`, `Autores`, `Tipo de obra`, `Revista`, `Año`, `Fecha`,
+  `Cuartil`, `ISSN`, `ISBN` y `Enlace`.
 - **Aviso de coincidencia débil** cuando el título no se parece al resultado de Crossref.
 - **Regla de fecha honesta**: mes y año si existe; **solo año** si Crossref no trae mes.
 - Etiqueta **`Cuartil:`** (antes `Indexacion:`) y valores **`Sin cuartil`** / **`REVISAR`**.
 - Cada tarjeta tiene **barra lateral** verde (obtuvo cuartil) o roja (no lo obtuvo),
-  y un botón **copiar** individual por cada campo (y **Abrir** en el enlace).
+  y un botón **Copiar todo** que copia la tarjeta completa con sus etiquetas
+  (más **Abrir** en el enlace). También existe **Copiar resultados**, que copia todas.
+
+### Autores, tipo de obra y logo
+
+Se agregaron dos metadatos que Crossref sí entrega de forma confiable:
+
+- **Autores** (`author`): formato `Apellido, Nombre; Apellido, Nombre`. También soporta
+  autores institucionales (solo traen `name`).
+- **Tipo de obra** (`type`): traducido a español desde `TIPOS_OBRA_ES`
+  (`journal-article` → Artículo, `book-chapter` → Capítulo de libro, `monograph` →
+  Monografía, `dissertation` → Tesis, `posted-content` → Preprint, etc.).
+  - Se usa el **tipo crudo** para decidir `Sin cuartil` y el **traducido** para mostrar.
+
+Además se corrigió el uso del logo, que antes solo servía como icono del *archivo* `.exe`:
+
+- **En el encabezado de la app**: `logo.png` (56×56, generado desde `MetaDOI.ico`) a la
+  izquierda del texto `MetaDOI`, dibujado con `tkinter.PhotoImage` nativo para **no**
+  requerir Pillow dentro del `.exe`.
+- **En la ventana del ejecutable**: antes el `.ico` no viajaba dentro del `.exe`, así que
+  `_poner_icono()` fallaba en silencio y CustomTkinter ponía su icono por defecto. Ahora
+  se empaqueta con `--add-data "MetaDOI.ico;."` y se usa como respaldo `logo.png`.
+
+> **Nota honesta:** en libros **editados**, Crossref suele traer `editor` y **no** `author`,
+> así que la fila `Autores` puede no aparecer. Los editores no se muestran todavía.
 
 ---
 
@@ -345,3 +382,6 @@ dist/
 
 Basta con entregar **`dist/MetaDOI.exe`**: la base de Scimago viaja embebida dentro del
 ejecutable y no requiere archivos externos.
+
+Para la entrega, el ejecutable se copia además a `entrega/MetaDOI/MetaDOI.exe`
+(esa carpeta está en `.gitignore`; el binario no se versiona, se publica como *release*).
